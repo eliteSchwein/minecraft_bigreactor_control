@@ -764,3 +764,22 @@ UI.selectTurbine = function(self)
 end -- UI.selectTurbine()
 
 UI.selectPrevTurbine = function(self)
+	if self.turbineIndex <= 1 then
+		self.turbineIndex = #turbineList
+		self.reactorIndex = #reactorList
+		self:selectReactor()
+	else
+		self.turbineIndex = self.turbineIndex - 1
+		self:selectTurbine()
+	end
+end -- UI.selectPrevTurbine()
+
+UI.selectNextTurbine = function(self)
+	if self.turbineIndex >= #turbineList then
+		self.turbineIndex = 1
+		self:selectStatus()
+	else
+		self.turbineIndex = self.turbineIndex + 1
+		self:selectTurbine()
+	end
+end -- UI.selectNextTurbine()
