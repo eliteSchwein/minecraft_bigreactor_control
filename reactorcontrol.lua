@@ -148,7 +148,7 @@ local steamRequested = 0 -- Sum of Turbine Flow Rate in mB
 local steamDelivered = 0 -- Sum of Active Reactor steam output in mB (reset each loop)
 local peripheralReinitPending = false -- Debounce flag for peripheral re-initialization
 
-local historyMaxSamples = 512
+local historyMaxSamples = 128
 local reactorHistory = {}
 local turbineHistory = {}
 
@@ -2095,13 +2095,12 @@ local function displayReactorOverview(monitorIndex)
     	local color = graphData.color
     	local usableWidth = graphWidth - 2
     	local sampleCount = #samples
+    	local startIndex = math.max(1, sampleCount - usableWidth + 1)
+
     	local px, py = nil, nil
+    	local x = graphX + 1
 
-    	for screenStep = 1, usableWidth do
-    		local sampleIndex = math.ceil(screenStep * sampleCount / usableWidth)
-    		local i = math.max(1, math.min(sampleCount, sampleIndex))
-    		local x = graphX + screenStep
-
+    	for i = startIndex, sampleCount do
     		local value = tonumber(samples[i]) or 0
     		local normalized = value / maxValue
     		local yPos = graphBottom - 1 - math.floor(normalized * (graphHeight - 3))
@@ -2114,6 +2113,7 @@ local function displayReactorOverview(monitorIndex)
 
     		px = x
     		py = yPos
+    		x = x + 1
     	end
     end
 
