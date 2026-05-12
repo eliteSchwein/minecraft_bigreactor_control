@@ -1,4 +1,3 @@
-```
 --[[
 Program name: Lolmer's EZ-NUKE reactor control system
 Version: v0.3.20
