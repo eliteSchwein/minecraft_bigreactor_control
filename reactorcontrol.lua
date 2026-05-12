@@ -162,13 +162,13 @@ write("Initializing program...\n")
 
 -- File needs to exist for append "a" later and zero it out if it already exists
 -- Always initalize this file to avoid confusion with old files and the latest run
-local logFile = fs.open("reactor_manager.log", "w")
+local logFile = fs.open("reactorcontrol.log", "w")
 if logFile then
 	logFile.writeLine("Minecraft time: Day "..os.day().." at "..textutils.formatTime(os.time(),true))
 	logFile.close()
 else
 		-- Non-fatal: fall back to console-only mode
-		write("WARNING: Could not open reactor_manager.log for writing. Logging to console only.\n")
+		write("WARNING: Could not open reactorcontrol.log for writing. Logging to console only.\n")
 end
 
 
@@ -219,12 +219,12 @@ local function printLog(printStr, logLevel)
 			end
 		end -- for
 
-		local logFile = fs.open("reactor_manager.log", "a") -- See http://computercraft.info/wiki/Fs.open
+		local logFile = fs.open("reactorcontrol.log", "a") -- See http://computercraft.info/wiki/Fs.open
 		if logFile then
 			logFile.writeLine(printStr)
 			logFile.close()
 		else
-			error("Cannot open file reactor_manager.log for appending!")
+			error("Cannot open file reactorcontrol.log for appending!")
 		end -- if logFile then
 	end -- if debugMode then
 end -- function printLog(printStr)
@@ -2445,14 +2445,19 @@ function main()
 
 		-- Telemetry: log efficiency metrics
 		if #reactorList > 0 then
-			local totalPowerOut = 0
+			local totalReactorRF = 0
+			local totalReactorSteam = 0
 			for ri = 1, #reactorList do
 				if reactorList[ri].mbIsConnected() then
-					totalPowerOut = totalPowerOut + reactorList[ri].getPowerOutput()
+					if reactorList[ri].isActivelyCooled() then
+						totalReactorSteam = totalReactorSteam + reactorList[ri].getHotFluidProducedLastTick()
+					else
+						totalReactorRF = totalReactorRF + reactorList[ri].getEnergyProducedLastTick()
+					end
 				end
 			end
 			local steamBalance = steamDelivered > 0 and (steamRequested / steamDelivered * 100) or 100
-			printLog(string.format("[TELEMETRY] Power output: %d RF/t | Steam demand: %.0f/%.0f mB (%.0f%%) | Reactors: %d | Turbines: %d", totalPowerOut, steamRequested, steamDelivered, steamBalance, #reactorList, #turbineList), INFO)
+			printLog(string.format("[TELEMETRY] Reactor RF: %d RF/t | Reactor steam: %d mB/t | Steam demand: %.0f/%.0f mB (%.0f%%) | Reactors: %d | Turbines: %d", totalReactorRF, totalReactorSteam, steamRequested, steamDelivered, steamBalance, #reactorList, #turbineList), INFO)
 		end
 
 		-- Turbine control
