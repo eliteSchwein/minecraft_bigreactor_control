@@ -22,29 +22,63 @@ local REACTORCONTROL_URL =
 
 local BOOTSTRAP_TIMEOUT = 30
 
-local function downloadScript(name, url, timeoutSec)
-	local hadLocalCopy = fs.exists(name)
+local function log(msg)
+	write(msg .. "\n")
+end
+
+local function backupFile(name)
 	local backupName = name .. ".bak"
 
-	if hadLocalCopy then
-		if fs.exists(backupName) then
-			fs.delete(backupName)
+	if fs.exists(backupName) then
+		fs.delete(backupName)
+	end
+
+	if fs.exists(name) then
+		fs.copy(name, backupName)
+	end
+
+	return backupName
+end
+
+local function restoreBackup(name, backupName)
+	if fs.exists(backupName) then
+		if fs.exists(name) then
+			fs.delete(name)
 		end
 
-		fs.copy(name, backupName)
+		fs.copy(backupName, name)
+		fs.delete(backupName)
+
+		return true
+	end
+
+	return false
+end
+
+local function downloadScript(name, url, timeoutSec)
+	local backupName = backupFile(name)
+
+	if fs.exists(name) then
 		fs.delete(name)
 	end
 
 	local startTime = os.clock()
 
 	repeat
-		local result = shell.run("wget", url, name)
+		log("Downloading " .. name .. "...")
 
-		if result == true or result == 0 then
+		if fs.exists(name) then
+			fs.delete(name)
+		end
+
+		local ok = shell.run("wget", url, name)
+
+		if ok == true or ok == 0 then
 			if fs.exists(backupName) then
 				fs.delete(backupName)
 			end
 
+			log("Downloaded as " .. name .. ".")
 			return true
 		end
 
@@ -59,39 +93,88 @@ local function downloadScript(name, url, timeoutSec)
 		os.sleep(2)
 	until false
 
-	if fs.exists(backupName) then
-		fs.copy(backupName, name)
-		fs.delete(backupName)
-
-		write("WARNING: Could not download " .. name .. ". Using local backup.\n")
+	if restoreBackup(name, backupName) then
+		log("WARNING: Could not download " .. name .. ". Using local backup.")
 		return true
 	end
 
 	error("Could not download " .. name .. ". No local backup available.")
 end
 
--- Optional self-update of startup.
--- Enabled: keeps startup.lua synced with GitHub.
--- Disable this block if you do not want startup to update itself.
-downloadScript("startup", STARTUP_URL, BOOTSTRAP_TIMEOUT)
+local function readFile(name)
+	local f = fs.open(name, "r")
+	if not f then
+		return nil
+	end
 
--- Download reactorcontrol from GitHub raw URL.
-downloadScript("reactorcontrol", REACTORCONTROL_URL, BOOTSTRAP_TIMEOUT)
+	local content = f.readAll()
+	f.close()
 
--- Verify reactorcontrol version if the file exposes it in the first line.
-if fs.exists("reactorcontrol") then
-	local f = fs.open("reactorcontrol", "r")
+	return content
+end
 
-	if f then
-		local firstLine = f.readLine()
-		f.close()
+local function writeFile(name, content)
+	local f = fs.open(name, "w")
+	if not f then
+		error("Could not open " .. name .. " for writing.")
+	end
 
-		if firstLine and string.find(firstLine, "Version: v" .. CONTROL_VERSION) then
-			write("Loaded reactorcontrol v" .. CONTROL_VERSION .. "\n")
-		else
-			write("WARNING: Loaded reactorcontrol has unexpected version info. Expected v" .. CONTROL_VERSION .. "\n")
-		end
+	f.write(content)
+	f.close()
+end
+
+local function patchReactorControl(name)
+	local content = readFile(name)
+
+	if not content then
+		error("Could not read " .. name .. " for patching.")
+	end
+
+	local original = content
+
+	-- ComputerCraft Lua has no "continue".
+	-- This fixes the known malformed-line parser block.
+	content = string.gsub(
+		content,
+		"if pos == nil then printLog%((.-)%, WARN%) found = true continue end line = line:gsub%(",
+		"if pos == nil then printLog(%1, WARN) found = true else line = line:gsub("
+	)
+
+	content = string.gsub(
+		content,
+		"tab%[currentTag%]%[stringTrim%(line:sub%(1, pos%-1%)%)%] = stringTrim%(line:sub%(pos%+1, line:len%(%)%)%) found = true end end line = f.readLine%(%)",
+		"tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len())) found = true end end end line = f.readLine()"
+	)
+
+	if content ~= original then
+		writeFile(name, content)
+		log("Patched " .. name .. " for ComputerCraft Lua compatibility.")
+	else
+		log("No patch needed for " .. name .. ".")
 	end
 end
+
+local function verifyVersion(name)
+	local content = readFile(name)
+
+	if not content then
+		log("WARNING: Could not verify " .. name .. " version.")
+		return
+	end
+
+	if string.find(content, "Version: v" .. CONTROL_VERSION, 1, true) then
+		log("Loaded reactorcontrol v" .. CONTROL_VERSION)
+	else
+		log("WARNING: Loaded reactorcontrol has unexpected version info. Expected v" .. CONTROL_VERSION)
+	end
+end
+
+-- Optional self-update.
+-- Comment this out if you do not want startup to replace itself.
+downloadScript("startup", STARTUP_URL, BOOTSTRAP_TIMEOUT)
+
+downloadScript("reactorcontrol", REACTORCONTROL_URL, BOOTSTRAP_TIMEOUT)
+patchReactorControl("reactorcontrol")
+verifyVersion("reactorcontrol")
 
 shell.run("reactorcontrol")
