@@ -2444,14 +2444,19 @@ function main()
 
 		-- Telemetry: log efficiency metrics
 		if #reactorList > 0 then
-			local totalPowerOut = 0
+			local totalReactorRF = 0
+			local totalReactorSteam = 0
 			for ri = 1, #reactorList do
 				if reactorList[ri].mbIsConnected() then
-					totalPowerOut = totalPowerOut + reactorList[ri].getPowerOutput()
+					if reactorList[ri].isActivelyCooled() then
+						totalReactorSteam = totalReactorSteam + reactorList[ri].getHotFluidProducedLastTick()
+					else
+						totalReactorRF = totalReactorRF + reactorList[ri].getEnergyProducedLastTick()
+					end
 				end
 			end
 			local steamBalance = steamDelivered > 0 and (steamRequested / steamDelivered * 100) or 100
-			printLog(string.format("[TELEMETRY] Power output: %d RF/t | Steam demand: %.0f/%.0f mB (%.0f%%) | Reactors: %d | Turbines: %d", totalPowerOut, steamRequested, steamDelivered, steamBalance, #reactorList, #turbineList), INFO)
+			printLog(string.format("[TELEMETRY] Reactor RF: %d RF/t | Reactor steam: %d mB/t | Steam demand: %.0f/%.0f mB (%.0f%%) | Reactors: %d | Turbines: %d", totalReactorRF, totalReactorSteam, steamRequested, steamDelivered, steamBalance, #reactorList, #turbineList), INFO)
 		end
 
 		-- Turbine control
