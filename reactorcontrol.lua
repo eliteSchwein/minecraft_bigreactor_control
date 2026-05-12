@@ -237,19 +237,43 @@ end
 
 -- Format number with [k,M,G,T,P,E] postfix or exponent, depending on how large it is
 local function formatReadableSIUnit(num)
-	printLog("formatReadableSIUnit("..num..")", DEBUG)
-	num = tonumber(num)
-	if(num < 1000) then return tostring(num) end
-	local sizes = {"", "k", "M", "G", "T", "P", "E"}
-	local exponent = math.floor(math.log(num,10))
-	local group = math.floor(exponent / 3)
-	if group > #sizes then
-		return string.format("%e", num)
-	else
-		local divisor = math.pow(10, (group - 1) * 3)
-		return string.format("%i%s", num / divisor, sizes[group])
+	num = tonumber(num) or 0
+
+	local sign = ""
+	if num < 0 then
+		sign = "-"
+		num = math.abs(num)
 	end
-end -- local function formatReadableSIUnit(num)
+
+	if num < 1000 then
+		return sign..tostring(math.floor(num + 0.5))
+	end
+
+	local suffixes = {"", "k", "M", "G", "T", "P", "E"}
+	local group = math.floor(math.log(num, 1000))
+
+	if group >= #suffixes then
+		return sign..string.format("%.2e", num)
+	end
+
+	local value = num / (1000 ^ group)
+
+	if value >= 100 then
+		return sign..string.format("%.0f%s", value, suffixes[group + 1])
+	elseif value >= 10 then
+		return sign..string.format("%.1f%s", value, suffixes[group + 1])
+	else
+		return sign..string.format("%.2f%s", value, suffixes[group + 1])
+	end
+end
+
+local function formatRFt(num)
+	return formatReadableSIUnit(num).."RF/t"
+end
+
+local function formatRF(num)
+	return formatReadableSIUnit(num).."RF"
+end
 
 -- pretty printLog() a table
 	local function tprint (tbl, loglevel, indent)
@@ -1835,7 +1859,7 @@ local function displayReactorBars(barParams)
 		print{curStoredEnergyPercent, width-(string.len(curStoredEnergyPercent)+2),7,monitorIndex}
 		print{"%",28,7,monitorIndex}
 
-		print{math.ceil(energyBuffer).." RF/t",padding+2,4,monitorIndex}
+		print{formatRFt(energyBuffer),padding+2,4,monitorIndex}
 	else
 		printLog("reactor["..reactorIndex.."] in displayReactorBars(reactorIndex="..reactorIndex..",monitorIndex="..monitorIndex..") is an actively cooled reactor.")
 		print{math.ceil(energyBuffer).." mB/t",padding+2,4,monitorIndex}
@@ -1938,47 +1962,131 @@ local function displayTurbineOverview(monitorIndex)
 	if not monitor then return end
 
 	local width, height = monitor.getSize()
-	local y = 3
+
+	local graphColors = {
+		colors.yellow,
+		colors.red,
+		colors.blue,
+		colors.lime,
+		colors.orange,
+		colors.cyan,
+		colors.purple,
+		colors.magenta,
+		colors.white
+	}
 
 	printCentered("Turbine Overview", 1, monitorIndex)
 	drawLine(2, monitorIndex)
 
+	local y = 3
+	local graphSamples = {}
+
 	for turbineIndex = 1, #turbineList do
-		if y > height - 3 then break end
+		if y > 6 then break end
 
 		local turbine = turbineList[turbineIndex]
 		local name = turbineNames[turbineIndex] or ("Turbine "..turbineIndex)
+		local color = graphColors[((turbineIndex - 1) % #graphColors) + 1]
+
+		drawPixel(2, y, color, monitorIndex)
 
 		if turbine and turbine.mbIsConnected() then
 			local active = turbine.getActive()
 			local rpm = math.ceil(turbine.getRotorSpeed())
 			local flow = math.ceil(turbine.getFluidFlowRate())
 			local output = math.ceil(turbine.getEnergyProducedLastTick())
-			local buffer = getTurbineStoredEnergyBufferPercent(turbine)
+			local graphKey = name.."_power"
 
 			monitor.setTextColor(active and colors.green or colors.red)
-			print{active and "ON " or "OFF", 2, y, monitorIndex}
+			print{active and "ON " or "OFF", 4, y, monitorIndex}
 			monitor.setTextColor(colors.white)
 
-			print{name, 6, y, monitorIndex}
+			print{name, 8, y, monitorIndex}
+
+			print{formatRFt(output), width - 15, y, monitorIndex}
 			y = y + 1
 
-			print{rpm.." RPM", 2, y, monitorIndex}
-			print{flow.." mB/t", 15, y, monitorIndex}
-			y = y + 1
+			print{"RPM:"..rpm, 4, y, monitorIndex}
+			print{"F:"..flow.."mB/t", width - 12, y, monitorIndex}
 
-			print{output.." RF/t  B:"..buffer.."%", 2, y, monitorIndex}
-			y = y + 1
-
-			drawHistoryGraph(turbineHistory[name.."_power"], 2, y, 27, 2, colors.yellow, monitorIndex)
-			y = y + 2
+			local samples = turbineHistory[graphKey]
+			if samples and #samples > 0 then
+				graphSamples[#graphSamples + 1] = {
+					samples = samples,
+					color = color
+				}
+			end
 		else
 			monitor.setTextColor(colors.red)
-			print{name.." DISCONNECTED", 2, y, monitorIndex}
+			print{"OFF", 4, y, monitorIndex}
 			monitor.setTextColor(colors.white)
-			y = y + 1
+
+			print{name.." DISCONNECTED", 8, y, monitorIndex}
+		end
+
+		y = y + 1
+	end
+
+	local graphX = 3
+	local graphY = 8
+	local graphWidth = width - graphX - 1
+	local graphHeight = height - graphY - 1
+	local graphBottom = graphY + graphHeight - 1
+
+	monitor.setBackgroundColor(colors.black)
+	for cy = graphY, graphBottom do
+		monitor.setCursorPos(graphX, cy)
+		monitor.write(string.rep(" ", graphWidth))
+	end
+
+	monitor.setTextColor(colors.gray)
+	for gy = graphY, graphBottom do
+		monitor.setCursorPos(graphX, gy)
+		monitor.write("|")
+	end
+
+	monitor.setCursorPos(graphX, graphBottom)
+	monitor.write(string.rep("-", graphWidth))
+
+	local maxValue = 1
+	for _, graphData in ipairs(graphSamples) do
+		for _, value in ipairs(graphData.samples) do
+			value = tonumber(value) or 0
+			if value > maxValue then
+				maxValue = value
+			end
 		end
 	end
+
+	for _, graphData in ipairs(graphSamples) do
+		local samples = graphData.samples
+		local color = graphData.color
+		local usableWidth = graphWidth - 2
+		local sampleCount = #samples
+		local startIndex = math.max(1, sampleCount - usableWidth + 1)
+
+		local px, py = nil, nil
+		local x = graphX + 1
+
+		for i = startIndex, sampleCount do
+			local value = tonumber(samples[i]) or 0
+			local normalized = value / maxValue
+			local yPos = graphBottom - 1 - math.floor(normalized * (graphHeight - 3))
+
+			if px ~= nil and py ~= nil then
+				drawBar(px, py, x, yPos, color, monitorIndex)
+			else
+				drawPixel(x, yPos, color, monitorIndex)
+			end
+
+			px = x
+			py = yPos
+			x = x + 1
+		end
+	end
+
+	monitor.setTextColor(colors.white)
+	monitor.setBackgroundColor(colors.black)
 
 	monitor.setCursorPos(1, height)
 	monitor.write("<")
@@ -2213,7 +2321,7 @@ local function displayAllStatus(monitorIndex)
 		monitor.setTextColor(colors.blue)
 		printRight("Reactor", 9, monitorIndex)
 		monitor.setTextColor(colors.white)
-		printRight(math.ceil(totalReactorRF).." (RF/t)", 10, monitorIndex)
+		printRight(formatRFt(totalReactorRF), 10, monitorIndex)
 	end
 
 	if #turbineList then
@@ -2231,11 +2339,11 @@ local function displayAllStatus(monitorIndex)
 		monitor.setTextColor(colors.blue)
 		printLeft("Turbine", 9, monitorIndex)
 		monitor.setTextColor(colors.white)
-		printLeft(math.ceil(totalTurbineRF).." RF/t", 10, monitorIndex)
+		printLeft(formatRFt(totalTurbineRF), 10, monitorIndex)
 	end -- if #turbineList then
 
 	printCentered("Fuel: "..round(totalReactorFuelConsumed,3).." mB/t", 11, monitorIndex)
-	printCentered("Buffer: "..formatReadableSIUnit(math.ceil(totalEnergy)).."/"..formatReadableSIUnit(totalMaxEnergyStored).." RF", 12, monitorIndex)
+	printCentered("Buffer: "..formatRF(totalEnergy).."/"..formatRF(totalMaxEnergyStored), 12, monitorIndex)
 
 	-- monitor switch controls
 	local width, height = monitor.getSize()
@@ -2306,7 +2414,7 @@ local function displayTurbineBars(turbineIndex, monitorIndex)
 
 	local energyBuffer = turbine.getEnergyProducedLastTick()
 	print{energyBufferString,1,4,monitorIndex}
-	print{math.ceil(energyBuffer).." RF/t",padding+1,4,monitorIndex}
+	print{formatRFt(energyBuffer),padding+1,4,monitorIndex}
 
 	local rotorSpeed = math.ceil(turbine.getRotorSpeed())
 	print{rotorSpeedString,1,5,monitorIndex}
