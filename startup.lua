@@ -12,11 +12,6 @@
 
 os.setComputerLabel("ReactorControl")
 
-local CONTROL_VERSION = "0.3.19"
-
-local STARTUP_URL =
-	"https://raw.githubusercontent.com/eliteSchwein/minecraft_bigreactor_control/refs/heads/master/startup.lua"
-
 local REACTORCONTROL_URL =
 	"https://raw.githubusercontent.com/eliteSchwein/minecraft_bigreactor_control/refs/heads/master/reactorcontrol.lua"
 
@@ -26,7 +21,29 @@ local function log(msg)
 	write(msg .. "\n")
 end
 
-local function backupFile(name)
+local function readFile(path)
+	local f = fs.open(path, "r")
+	if not f then
+		return nil
+	end
+
+	local content = f.readAll()
+	f.close()
+
+	return content
+end
+
+local function writeFile(path, content)
+	local f = fs.open(path, "w")
+	if not f then
+		error("Could not write " .. path)
+	end
+
+	f.write(content)
+	f.close()
+end
+
+local function downloadScript(name, url, timeoutSec)
 	local backupName = name .. ".bak"
 
 	if fs.exists(backupName) then
@@ -35,30 +52,6 @@ local function backupFile(name)
 
 	if fs.exists(name) then
 		fs.copy(name, backupName)
-	end
-
-	return backupName
-end
-
-local function restoreBackup(name, backupName)
-	if fs.exists(backupName) then
-		if fs.exists(name) then
-			fs.delete(name)
-		end
-
-		fs.copy(backupName, name)
-		fs.delete(backupName)
-
-		return true
-	end
-
-	return false
-end
-
-local function downloadScript(name, url, timeoutSec)
-	local backupName = backupFile(name)
-
-	if fs.exists(name) then
 		fs.delete(name)
 	end
 
@@ -66,10 +59,6 @@ local function downloadScript(name, url, timeoutSec)
 
 	repeat
 		log("Downloading " .. name .. "...")
-
-		if fs.exists(name) then
-			fs.delete(name)
-		end
 
 		local ok = shell.run("wget", url, name)
 
@@ -93,88 +82,61 @@ local function downloadScript(name, url, timeoutSec)
 		os.sleep(2)
 	until false
 
-	if restoreBackup(name, backupName) then
-		log("WARNING: Could not download " .. name .. ". Using local backup.")
+	if fs.exists(backupName) then
+		fs.copy(backupName, name)
+		fs.delete(backupName)
+
+		log("WARNING: Download failed. Using local backup.")
 		return true
 	end
 
-	error("Could not download " .. name .. ". No local backup available.")
+	error("Could not download " .. name)
 end
 
-local function readFile(name)
-	local f = fs.open(name, "r")
-	if not f then
-		return nil
-	end
-
-	local content = f.readAll()
-	f.close()
-
-	return content
-end
-
-local function writeFile(name, content)
-	local f = fs.open(name, "w")
-	if not f then
-		error("Could not open " .. name .. " for writing.")
-	end
-
-	f.write(content)
-	f.close()
-end
-
-local function patchReactorControl(name)
-	local content = readFile(name)
+local function patchReactorControl(path)
+	local content = readFile(path)
 
 	if not content then
-		error("Could not read " .. name .. " for patching.")
+		error("Could not read " .. path)
 	end
 
-	local original = content
+	content = content:gsub("\r\n", "\n")
 
-	-- ComputerCraft Lua has no "continue".
-	-- This fixes the known malformed-line parser block.
-	content = string.gsub(
-		content,
-		"if pos == nil then printLog%((.-)%, WARN%) found = true continue end line = line:gsub%(",
-		"if pos == nil then printLog(%1, WARN) found = true else line = line:gsub("
-	)
+	local oldBlock = [[
+						if pos == nil then
+							printLog("Skipping malformed line in "..path..": "..line, WARN)
+							found = true
+							continue
+						end
+						line = line:gsub("#_!36!_#", ";")
+						line = line:gsub("#_!71!_#", "=")
+						tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len()))
+						found = true]]
 
-	content = string.gsub(
-		content,
-		"tab%[currentTag%]%[stringTrim%(line:sub%(1, pos%-1%)%)%] = stringTrim%(line:sub%(pos%+1, line:len%(%)%)%) found = true end end line = f.readLine%(%)",
-		"tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len())) found = true end end end line = f.readLine()"
-	)
+	local newBlock = [[
+						if pos == nil then
+							printLog("Skipping malformed line in "..path..": "..line, WARN)
+							found = true
+						else
+							line = line:gsub("#_!36!_#", ";")
+							line = line:gsub("#_!71!_#", "=")
+							tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len()))
+							found = true
+						end]]
 
-	if content ~= original then
-		writeFile(name, content)
-		log("Patched " .. name .. " for ComputerCraft Lua compatibility.")
-	else
-		log("No patch needed for " .. name .. ".")
+	local patched, count = content:gsub(oldBlock, newBlock, 1)
+
+	if count < 1 then
+		log("WARNING: Exact patch failed, trying fallback patch.")
+
+		patched = content:gsub("\n%s*continue%s*\n", "\n", 1)
 	end
+
+	writeFile(path, patched)
+	log("Patched " .. path)
 end
-
-local function verifyVersion(name)
-	local content = readFile(name)
-
-	if not content then
-		log("WARNING: Could not verify " .. name .. " version.")
-		return
-	end
-
-	if string.find(content, "Version: v" .. CONTROL_VERSION, 1, true) then
-		log("Loaded reactorcontrol v" .. CONTROL_VERSION)
-	else
-		log("WARNING: Loaded reactorcontrol has unexpected version info. Expected v" .. CONTROL_VERSION)
-	end
-end
-
--- Optional self-update.
--- Comment this out if you do not want startup to replace itself.
-downloadScript("startup", STARTUP_URL, BOOTSTRAP_TIMEOUT)
 
 downloadScript("reactorcontrol", REACTORCONTROL_URL, BOOTSTRAP_TIMEOUT)
 patchReactorControl("reactorcontrol")
-verifyVersion("reactorcontrol")
 
 shell.run("reactorcontrol")
