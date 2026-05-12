@@ -175,61 +175,53 @@ end
 -- Helper functions
 
 local function termRestore()
-	local ccVersion = nil
-	ccVersion = os.version()
-
-	if ccVersion == "CraftOS 1.6" or ccVersion == "CraftOS 1.7" then
+	if term.native then
 		term.redirect(term.native())
-	elseif ccVersion == "CraftOS 1.5" then
-		term.restore()
-	else -- Default to older term.restore
-		printLog("Unsupported CraftOS found. Reported version is \""..ccVersion.."\".")
-		term.restore()
-	end -- if ccVersion
-end -- function termRestore()
+	end
+end
 
 local function printLog(printStr, logLevel)
 	logLevel = logLevel or INFO
-	-- No, I'm not going to write full syslog style levels. But this makes it a little easier filtering and finding stuff in the logfile.
-	-- Since you're already looking at it, you can adjust your preferred log level right here.
+
 	if debugMode and (logLevel >= WARN) then
-		-- If multiple monitors, print to all of them
 		for monitorName, deviceData in pairs(monitorAssignments) do
 			if deviceData.type == "Debug" then
-				debugMonitor = monitorList[deviceData.index]
-				if(not debugMonitor) or (not debugMonitor.getSize()) then
-					term.write("printLog(): debug monitor "..monitorName.." failed")
+				local debugMonitor = monitorList[deviceData.index]
+
+				if (not debugMonitor) or (not debugMonitor.getSize()) then
+					term.write("printLog(): debug monitor "..monitorName.." failed\n")
 				else
-					term.redirect(debugMonitor) -- Redirect to selected monitor
-					debugMonitor.setTextScale(0.5) -- Fit more logs on screen
+					term.redirect(debugMonitor)
+					debugMonitor.setTextScale(0.5)
+
 					local color = colors.lightGray
-					if (logLevel == WARN) then
+
+					if logLevel == WARN then
 						color = colors.white
-					elseif (logLevel == ERROR) then
+					elseif logLevel == ERROR then
 						color = colors.red
-					elseif (logLevel == FATAL) then
+					elseif logLevel == FATAL then
 						color = colors.black
 						debugMonitor.setBackgroundColor(colors.red)
 					end
+
 					debugMonitor.setTextColor(color)
-					write(printStr.."\n")   -- May need to use term.scroll(x) if we output too much, not sure
+					write(printStr.."\n")
 					debugMonitor.setBackgroundColor(colors.black)
+
 					termRestore()
 				end
 			end
-		end -- for
+		end
 
-		local logFile = fs.open("reactorcontrol.log", "a") -- See http://computercraft.info/wiki/Fs.open
+		local logFile = fs.open("reactorcontrol.log", "a")
+
 		if logFile then
 			logFile.writeLine(printStr)
 			logFile.close()
-		else
-			error("Cannot open file reactorcontrol.log for appending!")
-		end -- if logFile then
-	end -- if debugMode then
-end -- function printLog(printStr)
-
-
+		end
+	end
+end
 
 -- Trim a string
 local function stringTrim(s)
