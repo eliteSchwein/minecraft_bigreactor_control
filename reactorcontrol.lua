@@ -362,12 +362,12 @@ config.load = function(path)
 					if pos == nil then
 						printLog("Skipping malformed line in "..path..": "..line, WARN)
 						found = true
-						continue
+					else
+						line = line:gsub("#_!36!_#", ";")
+						line = line:gsub("#_!71!_#", "=")
+						tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len()))
+						found = true
 					end
-					line = line:gsub("#_!36!_#", ";")
-					line = line:gsub("#_!71!_#", "=")
-					tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len()))
-					found = true
 				end
 			end
 			line = f.readLine()
