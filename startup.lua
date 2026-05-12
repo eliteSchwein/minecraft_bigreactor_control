@@ -12,10 +12,10 @@
 
 os.setComputerLabel("ReactorControl")
 
-local SCRIPT_NAME = "reactor_manager"
+local SCRIPT_NAME = "reactorcontrol"
 
 local REACTOR_MANAGER_URL =
-	"https://raw.githubusercontent.com/eliteSchwein/minecraft_bigreactor_control/refs/heads/master/reactor_manager.lua"
+	"https://raw.githubusercontent.com/eliteSchwein/minecraft_bigreactor_control/refs/heads/master/reactorcontrol.lua"
 
 local function log(msg)
 	write(msg .. "\n")
