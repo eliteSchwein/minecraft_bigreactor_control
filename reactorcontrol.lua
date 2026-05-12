@@ -763,4 +763,4 @@ UI.selectTurbine = function(self)
 	self:logChange(messageText)
 end -- UI.selectTurbine()
 
-UI.selectPrevTurbine = function
+UI.selectPrevTurbine = function(self)
