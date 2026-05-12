@@ -125,7 +125,7 @@ See https://github.com/sandalle/minecraft_bigreactor_control/issues?q=is%3Aopen+
 
 
 -- Some global variables
-local progVer = "0.3.19"
+local progVer = "0.3.20"
 local progName = "EZ-NUKE"
 local sideClick, xClick, yClick = nil, 0, 0
 local loopTime = 2
@@ -147,6 +147,10 @@ local knowinglyOverride = false -- Issue #39 Allow the user to override safe val
 local steamRequested = 0 -- Sum of Turbine Flow Rate in mB
 local steamDelivered = 0 -- Sum of Active Reactor steam output in mB (reset each loop)
 local peripheralReinitPending = false -- Debounce flag for peripheral re-initialization
+
+local historyMaxSamples = 512
+local reactorHistory = {}
+local turbineHistory = {}
 
 -- Log levels
 local FATAL = 16
@@ -614,6 +618,54 @@ local function drawPixel(xPos, yPos, color, monitorIndex)
 	termRestore()
 end -- function drawPixel(xPos, yPos, color, monitorIndex)
 
+local function pushHistory(historyTable, key, value)
+	value = tonumber(value) or 0
+
+	if historyTable[key] == nil then
+		historyTable[key] = {}
+	end
+
+	table.insert(historyTable[key], value)
+
+	while #historyTable[key] > historyMaxSamples do
+		table.remove(historyTable[key], 1)
+	end
+end
+
+local function drawHistoryGraph(samples, x, y, width, height, color, monitorIndex)
+	if samples == nil or #samples < 2 then
+		return
+	end
+
+	local minValue = samples[1]
+	local maxValue = samples[1]
+
+	for i = 1, #samples do
+		if samples[i] < minValue then minValue = samples[i] end
+		if samples[i] > maxValue then maxValue = samples[i] end
+	end
+
+	if maxValue == minValue then
+		maxValue = minValue + 1
+	end
+
+	for gx = x, x + width - 1 do
+		for gy = y, y + height - 1 do
+			drawPixel(gx, gy, colors.gray, monitorIndex)
+		end
+	end
+
+	local startIndex = math.max(1, #samples - width + 1)
+	local graphX = x
+
+	for i = startIndex, #samples do
+		local normalized = (samples[i] - minValue) / (maxValue - minValue)
+		local graphY = y + height - 1 - math.floor(normalized * (height - 1))
+		drawPixel(graphX, graphY, color, monitorIndex)
+		graphX = graphX + 1
+	end
+end
+
 local function saveMonitorAssignments()
 	local assignments = {}
 	for monitor, data in pairs(monitorAssignments) do
@@ -622,9 +674,13 @@ local function saveMonitorAssignments()
 			name = data.reactorName
 		elseif (data.type == "Turbine") then
 			name = data.turbineName
-		else
-			name = data.type
-		end
+		elseif (data.type == "ReactorOverview") then
+        	name = "ReactorOverview"
+        elseif (data.type == "TurbineOverview") then
+        	name = "TurbineOverview"
+        else
+        	name = data.type
+        end
 		assignments[monitor] = name
 	end
 	config.save(monitorOptionFileName, {Monitors = assignments})
@@ -645,49 +701,96 @@ UI.handlePossibleClick = function(self)
 
 	self.monitorIndex = monitorData.index
 	local width, height = monitorList[self.monitorIndex].getSize()
-	-- All the last line are belong to us
+
 	if (yClick == height) then
-		if (monitorData.type == "Reactor") then
+		if (monitorData.type == "Status") then
 			if (xClick == 1) then
-				self:selectPrevReactor()
-			elseif (xClick == width) then
-				self:selectNextReactor()
-			elseif (3 <= xClick and xClick <= width - 2) then
-				if (#turbineList > 0) then
+				if #turbineList > 0 then
+					self.turbineIndex = #turbineList
 					self:selectTurbine()
+				elseif #reactorList > 0 then
+					self.reactorIndex = #reactorList
+					self:selectReactor()
 				else
 					self:selectStatus()
 				end
-			end
-		elseif (monitorData.type == "Turbine") then
-			if (xClick == 1) then
-				self:selectPrevTurbine()
 			elseif (xClick == width) then
-				self:selectNextTurbine()
+				self:selectReactorOverview()
 			elseif (3 <= xClick and xClick <= width - 2) then
-				self:selectStatus()
+				self:selectReactorOverview()
 			end
-		elseif (monitorData.type == "Status") then
+
+		elseif (monitorData.type == "ReactorOverview") then
 			if (xClick == 1) then
-				if (#turbineList > 0) then
-					self.turbineIndex = #turbineList
-					self:selectTurbine()
-				else
-					self.reactorIndex = 1
-					self:selectReactor()
-				end
+				self:selectStatus()
 			elseif (xClick == width) then
 				self.reactorIndex = 1
 				self:selectReactor()
 			elseif (3 <= xClick and xClick <= width - 2) then
+				self.reactorIndex = 1
 				self:selectReactor()
+			end
+
+		elseif (monitorData.type == "Reactor") then
+			if (xClick == 1) then
+				if self.reactorIndex <= 1 then
+					self:selectReactorOverview()
+				else
+					self.reactorIndex = self.reactorIndex - 1
+					self:selectReactor()
+				end
+			elseif (xClick == width) then
+				if self.reactorIndex >= #reactorList then
+					if #turbineList > 0 then
+						self:selectTurbineOverview()
+					else
+						self:selectStatus()
+					end
+				else
+					self.reactorIndex = self.reactorIndex + 1
+					self:selectReactor()
+				end
+			elseif (3 <= xClick and xClick <= width - 2) then
+				if #turbineList > 0 then
+					self:selectTurbineOverview()
+				else
+					self:selectStatus()
+				end
+			end
+
+		elseif (monitorData.type == "TurbineOverview") then
+			if (xClick == 1) then
+				self.reactorIndex = #reactorList
+				self:selectReactor()
+			elseif (xClick == width) then
+				self.turbineIndex = 1
+				self:selectTurbine()
+			elseif (3 <= xClick and xClick <= width - 2) then
+				self.turbineIndex = 1
+				self:selectTurbine()
+			end
+
+		elseif (monitorData.type == "Turbine") then
+			if (xClick == 1) then
+				if self.turbineIndex <= 1 then
+					self:selectTurbineOverview()
+				else
+					self.turbineIndex = self.turbineIndex - 1
+					self:selectTurbine()
+				end
+			elseif (xClick == width) then
+				if self.turbineIndex >= #turbineList then
+					self:selectStatus()
+				else
+					self.turbineIndex = self.turbineIndex + 1
+					self:selectTurbine()
+				end
+			elseif (3 <= xClick and xClick <= width - 2) then
+				self:selectStatus()
 			end
 		else
 			self:selectStatus()
 		end
-		-- Yes, that means we're skipping Debug. I figure everyone who wants that is
-		-- bound to use the console key commands anyway, and that way we don't have
-		-- it interfere with regular use.
 
 		sideClick, xClick, yClick = 0, 0, 0
 	else
@@ -782,6 +885,18 @@ UI.selectStatus = function(self)
 	local messageText = "Selected status summary for display on "..monitorNames[self.monitorIndex]
 	self:logChange(messageText)
 end -- UI.selectStatus()
+
+UI.selectReactorOverview = function(self)
+	monitorAssignments[monitorNames[self.monitorIndex]] = {type="ReactorOverview", index=self.monitorIndex}
+	saveMonitorAssignments()
+	self:logChange("Selected reactor overview for display on "..monitorNames[self.monitorIndex])
+end
+
+UI.selectTurbineOverview = function(self)
+	monitorAssignments[monitorNames[self.monitorIndex]] = {type="TurbineOverview", index=self.monitorIndex}
+	saveMonitorAssignments()
+	self:logChange("Selected turbine overview for display on "..monitorNames[self.monitorIndex])
+end
 
 UI.selectDebug = function(self)
 	monitorAssignments[monitorNames[self.monitorIndex]] = {type="Debug", index=self.monitorIndex}
@@ -1340,10 +1455,14 @@ local function assignMonitors()
 				if monitorName == monitorNames[monitorIndex] then
 					printLog("Found "..monitorName.." at index "..monitorIndex, DEBUG)
 					if assignedName == "Status" then
-						monitorAssignments[monitorName] = {type="Status", index=monitorIndex}
-					elseif assignedName == "Debug" then
-						monitorAssignments[monitorName] = {type="Debug", index=monitorIndex}
-					else
+                    	monitorAssignments[monitorName] = {type="Status", index=monitorIndex}
+                    elseif assignedName == "Debug" then
+                    	monitorAssignments[monitorName] = {type="Debug", index=monitorIndex}
+                    elseif assignedName == "ReactorOverview" then
+                    	monitorAssignments[monitorName] = {type="ReactorOverview", index=monitorIndex}
+                    elseif assignedName == "TurbineOverview" then
+                    	monitorAssignments[monitorName] = {type="TurbineOverview", index=monitorIndex}
+                    else
 						local maxListLen = math.max(#reactorNames, #turbineNames)
 						for i = 1, maxListLen do
 							if assignedName == reactorNames[i] then
@@ -1814,6 +1933,198 @@ local function reactorStatus(statusParams)
 	monitor.setTextColor(colors.white)
 end -- function reactorStatus(statusParams)
 
+local function displayTurbineOverview(monitorIndex)
+	local monitor = monitorList[monitorIndex]
+	if not monitor then return end
+
+	local width, height = monitor.getSize()
+	local y = 3
+
+	printCentered("Turbine Overview", 1, monitorIndex)
+	drawLine(2, monitorIndex)
+
+	for turbineIndex = 1, #turbineList do
+		if y > height - 3 then break end
+
+		local turbine = turbineList[turbineIndex]
+		local name = turbineNames[turbineIndex] or ("Turbine "..turbineIndex)
+
+		if turbine and turbine.mbIsConnected() then
+			local active = turbine.getActive()
+			local rpm = math.ceil(turbine.getRotorSpeed())
+			local flow = math.ceil(turbine.getFluidFlowRate())
+			local output = math.ceil(turbine.getEnergyProducedLastTick())
+			local buffer = getTurbineStoredEnergyBufferPercent(turbine)
+
+			monitor.setTextColor(active and colors.green or colors.red)
+			print{active and "ON " or "OFF", 2, y, monitorIndex}
+			monitor.setTextColor(colors.white)
+
+			print{name, 6, y, monitorIndex}
+			y = y + 1
+
+			print{rpm.." RPM", 2, y, monitorIndex}
+			print{flow.." mB/t", 15, y, monitorIndex}
+			y = y + 1
+
+			print{output.." RF/t  B:"..buffer.."%", 2, y, monitorIndex}
+			y = y + 1
+
+			drawHistoryGraph(turbineHistory[name.."_power"], 2, y, 27, 2, colors.yellow, monitorIndex)
+			y = y + 2
+		else
+			monitor.setTextColor(colors.red)
+			print{name.." DISCONNECTED", 2, y, monitorIndex}
+			monitor.setTextColor(colors.white)
+			y = y + 1
+		end
+	end
+
+	monitor.setCursorPos(1, height)
+	monitor.write("<")
+	monitor.setCursorPos(width, height)
+	monitor.write(">")
+end
+
+local function displayReactorOverview(monitorIndex)
+	local monitor = monitorList[monitorIndex]
+	if not monitor then return end
+
+	local width, height = monitor.getSize()
+
+	local graphColors = {
+		colors.yellow,
+		colors.red,
+		colors.blue,
+		colors.lime,
+		colors.orange,
+		colors.cyan,
+		colors.purple,
+		colors.magenta,
+		colors.white
+	}
+
+	printCentered("Reactor Overview", 1, monitorIndex)
+	drawLine(2, monitorIndex)
+
+	local y = 3
+	local graphSamples = {}
+
+	for reactorIndex = 1, #reactorList do
+		if y > 6 then break end
+
+		local reactor = reactorList[reactorIndex]
+		local name = reactorNames[reactorIndex] or ("Reactor "..reactorIndex)
+		local color = graphColors[((reactorIndex - 1) % #graphColors) + 1]
+
+		drawPixel(2, y, color, monitorIndex)
+
+		if reactor and reactor.mbIsConnected() then
+			local active = reactor.getActive()
+			local temp = math.ceil(reactor.getFuelTemperature())
+			local rod = math.ceil(reactor.getControlRodLevel(0))
+			local graphKey = name.."_power"
+
+			if reactor.isActivelyCooled() then
+				graphKey = name.."_steam"
+			end
+
+			monitor.setTextColor(active and colors.green or colors.red)
+			print{active and "ON " or "OFF", 4, y, monitorIndex}
+			monitor.setTextColor(colors.white)
+
+			print{name, 8, y, monitorIndex}
+
+			print{"T:"..temp, width - 15, y, monitorIndex}
+			print{"R:"..rod.."%", width - 7, y, monitorIndex}
+
+			local samples = reactorHistory[graphKey]
+			if samples and #samples > 0 then
+				graphSamples[#graphSamples + 1] = {
+					samples = samples,
+					color = color
+				}
+			end
+		else
+			monitor.setTextColor(colors.red)
+			print{"OFF", 4, y, monitorIndex}
+			monitor.setTextColor(colors.white)
+
+			print{name.." DISCONNECTED", 8, y, monitorIndex}
+		end
+
+		y = y + 1
+	end
+
+	local graphX = 3
+	local graphY = 8
+	local graphWidth = width - graphX - 1
+	local graphHeight = height - graphY - 1
+	local graphBottom = graphY + graphHeight - 1
+	local graphRight = graphX + graphWidth - 1
+
+	-- clear graph area
+	monitor.setBackgroundColor(colors.black)
+	for cy = graphY, graphBottom do
+		monitor.setCursorPos(graphX, cy)
+		monitor.write(string.rep(" ", graphWidth))
+	end
+
+	-- frame
+	monitor.setTextColor(colors.gray)
+	for gy = graphY, graphBottom do
+		monitor.setCursorPos(graphX, gy)
+		monitor.write("|")
+	end
+
+	monitor.setCursorPos(graphX, graphBottom)
+	monitor.write(string.rep("-", graphWidth))
+
+	local maxValue = 1
+	for _, graphData in ipairs(graphSamples) do
+		for _, value in ipairs(graphData.samples) do
+			value = tonumber(value) or 0
+			if value > maxValue then
+				maxValue = value
+			end
+		end
+	end
+
+	for _, graphData in ipairs(graphSamples) do
+    	local samples = graphData.samples
+    	local color = graphData.color
+    	local usableWidth = graphWidth - 2
+    	local sampleCount = #samples
+    	local px, py = nil, nil
+
+    	for screenStep = 1, usableWidth do
+    		local sampleIndex = math.ceil(screenStep * sampleCount / usableWidth)
+    		local i = math.max(1, math.min(sampleCount, sampleIndex))
+    		local x = graphX + screenStep
+
+    		local value = tonumber(samples[i]) or 0
+    		local normalized = value / maxValue
+    		local yPos = graphBottom - 1 - math.floor(normalized * (graphHeight - 3))
+
+    		if px ~= nil and py ~= nil then
+    			drawBar(px, py, x, yPos, color, monitorIndex)
+    		else
+    			drawPixel(x, yPos, color, monitorIndex)
+    		end
+
+    		px = x
+    		py = yPos
+    	end
+    end
+
+	monitor.setTextColor(colors.white)
+	monitor.setBackgroundColor(colors.black)
+
+	monitor.setCursorPos(1, height)
+	monitor.write("<")
+	monitor.setCursorPos(width, height)
+	monitor.write(">")
+end
 
 -- Display all found reactors' status to selected monitor
 -- This is only called if multiple reactors and/or a reactor plus at least one turbine are found
@@ -2301,6 +2612,16 @@ local function updateMonitors()
 			printCentered(progName.." "..progVer, 1, monitorIndex)
 			displayAllStatus(monitorIndex)
 
+        elseif monitorType == "ReactorOverview" then
+
+            clearMonitor(progName, monitorIndex)
+            displayReactorOverview(monitorIndex)
+
+        elseif monitorType == "TurbineOverview" then
+
+            clearMonitor(progName, monitorIndex)
+            displayTurbineOverview(monitorIndex)
+
 		elseif monitorType == "Reactor" then
 
 			-- Reactor display
@@ -2365,6 +2686,47 @@ local function updateMonitors()
 	end
 end
 
+local function collectHistory()
+	for reactorIndex = 1, #reactorList do
+		local reactor = reactorList[reactorIndex]
+		local reactorName = reactorNames[reactorIndex]
+
+		if reactor and reactor.mbIsConnected() then
+			pushHistory(reactorHistory, reactorName.."_fuel", reactor.getFuelAmount())
+			pushHistory(reactorHistory, reactorName.."_temp", reactor.getFuelTemperature())
+			pushHistory(reactorHistory, reactorName.."_rod", reactor.getControlRodLevel(0))
+
+			if reactor.isActivelyCooled() then
+				pushHistory(reactorHistory, reactorName.."_steam", reactor.getHotFluidProducedLastTick())
+				pushHistory(reactorHistory, reactorName.."_water", reactor.getCoolantAmount())
+			else
+				pushHistory(reactorHistory, reactorName.."_power", reactor.getEnergyProducedLastTick())
+				pushHistory(reactorHistory, reactorName.."_buffer", reactor.getEnergyStored())
+			end
+		end
+	end
+
+	for turbineIndex = 1, #turbineList do
+		local turbine = turbineList[turbineIndex]
+		local turbineName = turbineNames[turbineIndex]
+
+		if turbine and turbine.mbIsConnected() then
+			pushHistory(turbineHistory, turbineName.."_power", turbine.getEnergyProducedLastTick())
+			pushHistory(turbineHistory, turbineName.."_rpm", turbine.getRotorSpeed())
+			pushHistory(turbineHistory, turbineName.."_steam", turbine.getFluidFlowRate())
+			pushHistory(turbineHistory, turbineName.."_buffer", turbine.getEnergyStored())
+
+			if turbine.getInputAmount then
+				pushHistory(turbineHistory, turbineName.."_steam_stored", turbine.getInputAmount())
+			end
+
+			if turbine.getOutputAmount then
+				pushHistory(turbineHistory, turbineName.."_water", turbine.getOutputAmount())
+			end
+		end
+	end
+end
+
 function main()
 	-- Load reactor parameters and initialize systems
 	loadReactorOptions()
@@ -2375,6 +2737,7 @@ function main()
 	--TODO: this is a global variable set by the event handler!
 	while not finished do
 
+        collectHistory()
 		updateMonitors()
 
 		local reactor = nil
