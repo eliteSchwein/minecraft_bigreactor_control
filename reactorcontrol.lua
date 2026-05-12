@@ -316,7 +316,7 @@ config.save = function(path, tab)
 	f:close()
 	-- Rename temp file to final path (atomic on most filesystems)
 	fs.delete(path)
-	os.rename(tmpPath, path)
+	fs.move(tmpPath, path)
 end --config.save = function(path, tab)
 
 -- Load a config file
