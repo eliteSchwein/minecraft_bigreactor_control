@@ -162,13 +162,13 @@ write("Initializing program...\n")
 
 -- File needs to exist for append "a" later and zero it out if it already exists
 -- Always initalize this file to avoid confusion with old files and the latest run
-local logFile = fs.open("reactorcontrol.log", "w")
+local logFile = fs.open("reactor_manager.log", "w")
 if logFile then
 	logFile.writeLine("Minecraft time: Day "..os.day().." at "..textutils.formatTime(os.time(),true))
 	logFile.close()
 else
 		-- Non-fatal: fall back to console-only mode
-		write("WARNING: Could not open reactorcontrol.log for writing. Logging to console only.\n")
+		write("WARNING: Could not open reactor_manager.log for writing. Logging to console only.\n")
 end
 
 
@@ -219,12 +219,12 @@ local function printLog(printStr, logLevel)
 			end
 		end -- for
 
-		local logFile = fs.open("reactorcontrol.log", "a") -- See http://computercraft.info/wiki/Fs.open
+		local logFile = fs.open("reactor_manager.log", "a") -- See http://computercraft.info/wiki/Fs.open
 		if logFile then
 			logFile.writeLine(printStr)
 			logFile.close()
 		else
-			error("Cannot open file reactorcontrol.log for appending!")
+			error("Cannot open file reactor_manager.log for appending!")
 		end -- if logFile then
 	end -- if debugMode then
 end -- function printLog(printStr)
@@ -316,7 +316,7 @@ config.save = function(path, tab)
 	f:close()
 	-- Rename temp file to final path (atomic on most filesystems)
 	fs.delete(path)
-	fs.move(tmpPath, path)
+	os.rename(tmpPath, path)
 end --config.save = function(path, tab)
 
 -- Load a config file
@@ -362,12 +362,12 @@ config.load = function(path)
 					if pos == nil then
 						printLog("Skipping malformed line in "..path..": "..line, WARN)
 						found = true
-					else
-						line = line:gsub("#_!36!_#", ";")
-						line = line:gsub("#_!71!_#", "=")
-						tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len()))
-						found = true
+						continue
 					end
+					line = line:gsub("#_!36!_#", ";")
+					line = line:gsub("#_!71!_#", "=")
+					tab[currentTag][stringTrim(line:sub(1, pos-1))] = stringTrim(line:sub(pos+1, line:len()))
+					found = true
 				end
 			end
 			line = f.readLine()
